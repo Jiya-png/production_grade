@@ -22,14 +22,14 @@ export async function queueAnalysis<T>(
   fn: () => Promise<T>,
   priority: number = 0
 ): Promise<T> {
-  return analysisQueue.add(fn, { priority });
+  return analysisQueue.add(fn, { priority }) as Promise<T>;
 }
 
 export async function queueFileAnalysis<T>(
   fn: () => Promise<T>,
   priority: number = 0
 ): Promise<T> {
-  return fileQueue.add(fn, { priority });
+  return fileQueue.add(fn, { priority }) as Promise<T>;
 }
 
 export function getQueueStats() {
