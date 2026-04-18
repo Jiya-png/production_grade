@@ -84,7 +84,12 @@ export async function cacheSet<T>(
 export async function cacheDelete(key: string): Promise<void> {
   try {
     const client = getRedis();
-    await client.del(key);
+    if (client) {
+      await client.del(key);
+    } else {
+      // Use in-memory cache as fallback
+      inMemoryCache.delete(key);
+    }
   } catch (err) {
     console.error('Cache delete error:', err);
   }
