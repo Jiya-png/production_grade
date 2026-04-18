@@ -1,29 +1,36 @@
 import Redis from 'ioredis';
 
 let redis: Redis | null = null;
+const inMemoryCache = new Map<string, { value: string; expiresAt: number }>();
 
 function getRedis() {
-  if (!redis) {
-    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      retryStrategy: (times) => Math.min(times * 50, 2000),
-      reconnectOnError: (err) => {
-        const targetError = 'READONLY';
-        if (err.message.includes(targetError)) {
-          return true;
+  if (!redis && process.env.REDIS_URL) {
+    try {
+      redis = new Redis(process.env.REDIS_URL, {
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        retryStrategy: (times) => Math.min(times * 50, 2000),
+        reconnectOnError: (err) => {
+          const targetError = 'READONLY';
+          if (err.message.includes(targetError)) {
+            return true;
+          }
+          return false;
         }
-        return false;
-      }
-    });
+      });
 
-    redis.on('error', (err) => {
-      console.error('Redis client error:', err);
-    });
+      redis.on('error', (err) => {
+        console.error('Redis client error:', err);
+        redis = null;
+      });
 
-    redis.on('connect', () => {
-      console.log('Redis client connected');
-    });
+      redis.on('connect', () => {
+        console.log('Redis client connected');
+      });
+    } catch (err) {
+      console.warn('Failed to connect to Redis, using in-memory cache');
+      redis = null;
+    }
   }
 
   return redis;
@@ -32,9 +39,18 @@ function getRedis() {
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
     const client = getRedis();
-    const cached = await client.get(key);
-    if (cached) {
-      return JSON.parse(cached) as T;
+    if (client) {
+      const cached = await client.get(key);
+      if (cached) {
+        return JSON.parse(cached) as T;
+      }
+    } else {
+      // Use in-memory cache as fallback
+      const cached = inMemoryCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return JSON.parse(cached.value) as T;
+      }
+      inMemoryCache.delete(key);
     }
     return null;
   } catch (err) {
@@ -50,7 +66,15 @@ export async function cacheSet<T>(
 ): Promise<void> {
   try {
     const client = getRedis();
-    await client.setex(key, ttlSeconds, JSON.stringify(value));
+    if (client) {
+      await client.setex(key, ttlSeconds, JSON.stringify(value));
+    } else {
+      // Use in-memory cache as fallback
+      inMemoryCache.set(key, {
+        value: JSON.stringify(value),
+        expiresAt: Date.now() + ttlSeconds * 1000
+      });
+    }
   } catch (err) {
     console.error('Cache set error:', err);
     // Fail gracefully — continue without caching

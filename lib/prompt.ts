@@ -7,31 +7,37 @@ const levelInstructions = {
 };
 
 export function buildPrompt(readme: string, fileTree: string[], level: Level) {
-  return `
-You are a senior developer explaining a GitHub repository to someone.
+  const trimmedReadme = readme.slice(0, 2000);
+  const importantFiles = fileTree
+    .filter(f => 
+      !f.includes("test") && 
+      !f.includes("__pycache__") && 
+      !f.endsWith(".png") && 
+      !f.endsWith(".jpg") && 
+      !f.endsWith(".svg") && 
+      !f.endsWith(".ico") && 
+      !f.includes("package-lock") && 
+      !f.endsWith(".min.js")
+    )
+    .slice(0, 40);
+
+  return `You are a senior developer explaining a GitHub repository.
 Explanation style: ${levelInstructions[level]}
 
-Here is the README:
-<readme>
-${readme.slice(0, 3000)}
-</readme>
+README (trimmed):
+<readme>${trimmedReadme}</readme>
 
-Here is the file/folder structure:
-<file_tree>
-${fileTree.join("\n")}
-</file_tree>
+File structure (key files only):
+<file_tree>${importantFiles.join("\n")}</file_tree>
 
-Return a JSON object with EXACTLY this shape:
+Return a JSON object with EXACTLY this shape and nothing else:
 {
-  "summary": "2-3 sentence plain-English description of what this project does",
-  "techStack": ["list", "of", "technologies", "detected"],
+  "summary": "2-3 sentence plain-English description",
+  "techStack": ["list", "of", "technologies"],
   "howToRun": ["step 1", "step 2", "step 3"],
-  "fileExplanations": [
-    { "path": "src/index.js", "explanation": "what this file does" }
-  ],
-  "keyInsight": "One sentence on the most interesting architectural decision"
+  "fileExplanations": [{ "path": "filename", "explanation": "one sentence" }],
+  "keyInsight": "One sentence on most interesting architectural decision"
 }
 
-Only return valid JSON. No markdown, no extra text.
-`;
+Rules: Only valid JSON, no markdown, no backticks, no extra text, fileExplanations max 15 files.`;
 }

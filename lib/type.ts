@@ -8,17 +8,25 @@ export interface FileExplanation {
 export interface AnalyzeResult {
   owner: string;
   repo: string;
+  level?: string;
   summary: string;
   techStack: string[];
   howToRun: string[];
   fileExplanations: FileExplanation[];
   keyInsight: string;
+  _cached?: boolean;
+  _responseTime?: number;
+  _timestamp?: number;
 }
 
 export interface FileDetail {
   purpose: string;
   whatItDoes: string[];
-  keyFunctions: { name: string; description: string }[];
+  keyFunctions: Array<{
+    name: string;
+    description: string;
+  }>;
   dependsOn: string[];
   tip: string;
+  error?: string;
 }
