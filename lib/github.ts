@@ -1,3 +1,19 @@
+const GITHUB_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "User-Agent": "repo-explainer-app",
+  ...(process.env.GITHUB_TOKEN
+    ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+    : {})
+};
+
+const GITHUB_RAW_HEADERS = {
+  Accept: "application/vnd.github.raw",
+  "User-Agent": "repo-explainer-app",
+  ...(process.env.GITHUB_TOKEN
+    ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+    : {})
+};
+
 export function parseGitHubUrl(url: string) {
   const match = url.match(/github\.com\/([^/]+)\/([^/?#]+)/);
   if (!match) throw new Error("Invalid GitHub URL");
@@ -8,12 +24,7 @@ export async function fetchReadme(owner: string, repo: string): Promise<string> 
   try {
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/readme`,
-      {
-        headers: {
-          Accept: "application/vnd.github.raw",
-          "User-Agent": "repo-explainer-app"
-        }
-      }
+      { headers: GITHUB_RAW_HEADERS }
     );
     if (!res.ok) return "No README found.";
     return await res.text();
@@ -24,15 +35,9 @@ export async function fetchReadme(owner: string, repo: string): Promise<string> 
 
 export async function fetchFileTree(owner: string, repo: string): Promise<string[]> {
   try {
-    // Step 1: get default branch
     const repoRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}`,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "repo-explainer-app"
-        }
-      }
+      { headers: GITHUB_HEADERS }
     );
 
     if (!repoRes.ok) throw new Error(`Repo fetch failed: ${repoRes.status}`);
@@ -40,15 +45,9 @@ export async function fetchFileTree(owner: string, repo: string): Promise<string
     const defaultBranch = repoData.default_branch || "main";
     console.log("✅ Default branch:", defaultBranch);
 
-    // Step 2: get file tree
     const treeRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "repo-explainer-app"
-        }
-      }
+      { headers: GITHUB_HEADERS }
     );
 
     if (!treeRes.ok) throw new Error(`Tree fetch failed: ${treeRes.status}`);
@@ -83,12 +82,7 @@ export async function fetchFileContent(owner: string, repo: string, path: string
   try {
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-      {
-        headers: {
-          Accept: "application/vnd.github.raw",
-          "User-Agent": "repo-explainer-app"
-        }
-      }
+      { headers: GITHUB_RAW_HEADERS }
     );
     if (!res.ok) return "Could not load file.";
     return await res.text();

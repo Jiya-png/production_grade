@@ -1,28 +1,43 @@
 {
-  "name": "repo-explainer",
-  "version": "0.1.0",
+  "name": "repo-explainer-pro",
+  "version": "1.0.0",
+  "description": "Production-ready AI-powered GitHub repository analyzer",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "axios": "^1.15.0",
-    "next": "16.2.3",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "next": "^14.0.0",
+    "groq-sdk": "^0.4.2",
+    "ioredis": "^5.3.2",
+    "@upstash/ratelimit": "^1.0.1",
+    "@upstash/redis": "^1.25.0",
+    "p-queue": "^7.4.1",
+    "axios": "^1.6.5"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.3",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6",
+    "@types/react": "^18.2.46",
+    "@types/react-dom": "^18.2.18",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.0.0",
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/jest-dom": "^6.1.5",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   }
 }
