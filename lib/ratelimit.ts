@@ -6,28 +6,22 @@ import { Redis } from '@upstash/redis';
 // We use Upstash Redis (free tier) for distributed rate limiting
 
 let limiter: Ratelimit | null = null;
+const ipRequestCounts = new Map<string, { count: number; resetTime: number }>();
 
 function getLimiter() {
-  if (!limiter) {
-    // Using environment-based fallback for local dev
-    // Production should use Upstash Redis with UPSTASH_REDIS_REST_URL
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    if (isProduction && !process.env.UPSTASH_REDIS_REST_URL) {
-      console.warn('UPSTASH_REDIS_REST_URL not set for production rate limiting');
+  if (!limiter && process.env.UPSTASH_REDIS_REST_URL) {
+    try {
+      // Create a rate limiter: 30 requests per 60 seconds
+      limiter = new Ratelimit({
+        redis: Redis.fromEnv(),
+        limiter: Ratelimit.tokenBucket(30, '60 s'),
+        analytics: true,
+        prefix: 'groq_ratelimit'
+      });
+    } catch (err) {
+      console.warn('Failed to initialize Upstash rate limiter:', err);
+      limiter = null;
     }
-
-    // Create a rate limiter: 30 requests per 60 seconds = 1 request per 2 seconds
-    limiter = new Ratelimit({
-      redis: Redis.fromEnv(),
-      limiter: Ratelimit.tokenBucket(
-        30, // 30 tokens
-        60, // per 60 seconds
-        '1 s' // refill rate
-      ),
-      analytics: true,
-      prefix: 'groq_ratelimit'
-    });
   }
 
   return limiter;
@@ -43,16 +37,51 @@ export interface RateLimitResult {
 export async function checkRateLimit(identifier: string): Promise<RateLimitResult> {
   try {
     const limiter = getLimiter();
-    const { success, remaining, reset } = await limiter.limit(identifier);
+    
+    if (limiter) {
+      // Use Upstash if available
+      const { success, remaining, reset } = await limiter.limit(identifier);
 
-    return {
-      success,
-      remaining: Math.max(0, remaining),
-      resetTime: reset,
-      retryAfter: success ? 0 : Math.ceil((reset - Date.now()) / 1000)
-    };
+      return {
+        success,
+        remaining: Math.max(0, remaining),
+        resetTime: reset,
+        retryAfter: success ? 0 : Math.ceil((reset - Date.now()) / 1000)
+      };
+    } else {
+      // Fallback: in-memory rate limiting
+      const now = Date.now();
+      const data = ipRequestCounts.get(identifier);
+
+      if (!data || now > data.resetTime) {
+        // Reset: new window
+        ipRequestCounts.set(identifier, {
+          count: 1,
+          resetTime: now + 60000 // 60 seconds from now
+        });
+        return { success: true, remaining: 29, resetTime: now + 60000 };
+      }
+
+      if (data.count >= 30) {
+        // Rate limit exceeded
+        return {
+          success: false,
+          remaining: 0,
+          resetTime: data.resetTime,
+          retryAfter: Math.ceil((data.resetTime - now) / 1000)
+        };
+      }
+
+      // Increment and allow
+      data.count++;
+      return {
+        success: true,
+        remaining: 30 - data.count,
+        resetTime: data.resetTime
+      };
+    }
   } catch (err) {
-    // If rate limiter fails, allow the request but log the error
+    // If rate limiter fails, allow the request but log
     console.error('Rate limit check error:', err);
     return {
       success: true,
