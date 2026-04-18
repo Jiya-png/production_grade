@@ -1,6 +1,6 @@
 "use client";
 import { useState, useCallback } from "react";
-import { AnalyzeResult, FileDetail, Level } from "@/lib/types";
+import { AnalyzeResult, FileDetail, Level } from "@/lib/type";
 
 const MESSAGES = [
   "🔍 Fetching repo...",
