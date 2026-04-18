@@ -22,7 +22,8 @@ function getLimiter() {
       redis: Redis.fromEnv(),
       limiter: Ratelimit.tokenBucket(
         30, // 30 tokens
-        '60 s' // per 60 seconds
+        60, // per 60 seconds
+        '1 s' // refill rate
       ),
       analytics: true,
       prefix: 'groq_ratelimit'
