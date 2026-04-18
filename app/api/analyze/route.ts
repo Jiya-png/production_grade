@@ -1,93 +1,143 @@
-import { NextRequest, NextResponse } from "next/server";
-import Groq from "groq-sdk";
-import { parseGitHubUrl, fetchReadme, fetchFileTree } from "@/lib/github";
-import { buildPrompt } from "@/lib/prompt";
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+import { NextRequest, NextResponse } from "next/server"
+import Groq from "groq-sdk"
+import { cacheGet, cacheSet } from "@/lib/cache"
+import { checkRateLimit } from "@/lib/ratelimit"
+import { queueAnalysis } from "@/lib/queue"
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    console.log("✅ Request body:", body);
+  // ═══════════════════════════════════════════════════════
+  // STEP 1: RECEIVE THE REQUEST
+  // ═══════════════════════════════════════════════════════
+  
+  const startTime = Date.now()  // Record when this started
+  
+  // Get the data the user sent
+  const body = await req.json()
+  const url = body.url  // "https://github.com/expressjs/express"
+  const level = body.level  // "beginner"
+  
+  // Parse the URL to extract owner and repo name
+  // From: "https://github.com/expressjs/express"
+  // Extract: owner = "expressjs", repo = "express"
+  const { owner, repo } = parseGitHubUrl(url)
+  
+  console.log(`Analyzing ${owner}/${repo} for ${level} level`)
 
-    const { url, level } = body;
-
-    if (!url) {
-      return NextResponse.json({ error: "No URL provided" }, { status: 400 });
-    }
-
-    // Step 1: Parse URL
-    let owner: string, repo: string;
-    try {
-      const parsed = parseGitHubUrl(url);
-      owner = parsed.owner;
-      repo = parsed.repo;
-      console.log("✅ Parsed:", { owner, repo });
-    } catch (e: any) {
-      return NextResponse.json({ error: "Invalid GitHub URL" }, { status: 400 });
-    }
-
-    // Step 2: Fetch GitHub data
-    let readme: string, fileTree: string[];
-    try {
-      console.log("⏳ Fetching GitHub data...");
-      [readme, fileTree] = await Promise.all([
-        fetchReadme(owner, repo),
-        fetchFileTree(owner, repo)
-      ]);
-      console.log("✅ README length:", readme.length);
-      console.log("✅ File count:", fileTree.length);
-    } catch (e: any) {
-      console.error("❌ GitHub fetch error:", e?.message);
-      return NextResponse.json(
-        { error: `Failed to fetch repo from GitHub: ${e?.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Step 3: Build prompt
-    const prompt = buildPrompt(readme, fileTree, level);
-    console.log("✅ Prompt length:", prompt.length);
-
-    // Step 4: Call Groq
-    let text: string;
-    try {
-      console.log("⏳ Calling Groq...");
-      const completion = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 2000
-      });
-      text = completion.choices[0]?.message?.content || "";
-      console.log("✅ Groq response length:", text.length);
-      console.log("✅ Groq raw (first 300):", text.slice(0, 300));
-    } catch (e: any) {
-      console.error("❌ Groq error:", e?.message);
-      return NextResponse.json(
-        { error: `Groq API failed: ${e?.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Step 5: Parse JSON
-    let parsed: any;
-    try {
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      parsed = JSON.parse(cleaned);
-      console.log("✅ JSON parsed successfully");
-    } catch (e) {
-      console.error("❌ JSON parse failed. Raw text:", text);
-      return NextResponse.json(
-        { error: "AI returned invalid JSON. Try again." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ owner, repo, ...parsed });
-
-  } catch (e: any) {
-    console.error("❌ Unexpected error:", e);
-    return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
+  // ═══════════════════════════════════════════════════════
+  // STEP 2: CHECK RATE LIMIT
+  // ═══════════════════════════════════════════════════════
+  
+  // Get user's IP address
+  const userIP = req.headers.get("x-forwarded-for") || "unknown"
+  
+  // Ask the rate limiter: "Can this IP make a request?"
+  const rateLimitCheck = await checkRateLimit(userIP)
+  
+  if (!rateLimitCheck.success) {
+    // Too many requests from this IP
+    return NextResponse.json(
+      { 
+        error: "Too many requests. Please wait before trying again.",
+        retryAfter: rateLimitCheck.retryAfter  // "Try again in 30 seconds"
+      },
+      { status: 429 }  // 429 = "Too Many Requests"
+    )
   }
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 3: CHECK CACHE
+  // ═══════════════════════════════════════════════════════
+  
+  // Create a key to remember this specific request
+  const cacheKey = `repo:${owner}:${repo}:${level}`
+  // Example: "repo:expressjs:express:beginner"
+  
+  // Ask the cache: "Do we have this answer already?"
+  const cachedResult = await cacheGet(cacheKey)
+  
+  if (cachedResult) {
+    // YES! We have it saved! Return immediately
+    console.log(`Cache hit! Returning cached result for ${cacheKey}`)
+    return NextResponse.json({
+      ...cachedResult,
+      _cached: true,  // Tell the frontend this came from cache
+      _responseTime: Date.now() - startTime
+    })
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 4: FETCH DATA FROM GITHUB
+  // ═══════════════════════════════════════════════════════
+  
+  console.log(`Cache miss. Fetching from GitHub...`)
+  
+  // Download the README file
+  const readme = await fetchReadme(owner, repo)
+  // Example: "Express is a web framework for Node.js..."
+  
+  // Get the list of all files and folders
+  const fileTree = await fetchFileTree(owner, repo)
+  // Example: ["src/index.js", "src/utils.js", "package.json", ...]
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 5: BUILD THE PROMPT FOR THE AI
+  // ═══════════════════════════════════════════════════════
+  
+  const prompt = buildPrompt(readme, fileTree, level)
+  // This creates instructions for the AI based on skill level
+  
+  // If level is "beginner":
+  // Prompt says: "Explain this VERY SIMPLY. Use EASY words."
+  // If level is "advanced":
+  // Prompt says: "Explain TECHNICALLY. Mention design patterns."
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 6: ADD TO QUEUE AND CALL AI
+  // ═══════════════════════════════════════════════════════
+  
+  console.log(`Adding to queue...`)
+  
+  // Add to queue (waits if 2+ requests are already running)
+  const result = await queueAnalysis(async () => {
+    // Call the Groq AI API
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",  // The AI model we use
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,  // Lower = more consistent answers
+      max_tokens: 2000  // Max length of response
+    })
+    
+    // Extract the text from the AI response
+    const text = completion.choices[0].message.content
+    
+    // AI returns JSON, clean it up
+    const cleaned = text.replace(/```json|```/g, "").trim()
+    const parsed = JSON.parse(cleaned)
+    
+    return parsed
+  })
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 7: SAVE TO CACHE
+  // ═══════════════════════════════════════════════════════
+  
+  console.log(`Saving to cache...`)
+  
+  // Save the result for 24 hours
+  await cacheSet(cacheKey, result, 86400)  // 86400 seconds = 24 hours
+
+  // ═══════════════════════════════════════════════════════
+  // STEP 8: RETURN RESPONSE TO USER
+  // ═══════════════════════════════════════════════════════
+  
+  const duration = Date.now() - startTime
+  
+  return NextResponse.json({
+    owner,
+    repo,
+    level,
+    ...result,
+    _cached: false,  // This is fresh data, not from cache
+    _responseTime: duration
+  })
 }
