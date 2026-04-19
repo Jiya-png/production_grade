@@ -14,7 +14,7 @@ function getLimiter() {
       // Create a rate limiter: 30 requests per 60 seconds
       limiter = new Ratelimit({
         redis: Redis.fromEnv(),
-        limiter: Ratelimit.tokenBucket(30, '60 s'),
+        limiter: Ratelimit.tokenBucket(30, '60 s', 1),
         analytics: true,
         prefix: 'groq_ratelimit'
       });
